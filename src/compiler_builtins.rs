@@ -3,8 +3,6 @@ use std::ffi::c_int;
 #[cfg(feature = "jit")]
 use std::ffi::c_void;
 
-use cranelift_codegen::ir::{Type, types};
-
 // FIXME replace with core::ffi::c_size_t once stabilized
 #[allow(non_camel_case_types)]
 #[cfg(feature = "jit")]
@@ -16,20 +14,12 @@ type size_t = usize;
 #[cfg(any(target_arch = "aarch64", target_arch = "arm64ec"))]
 #[cfg(feature = "jit")]
 type CmpResult = i32;
-#[cfg(any(target_arch = "aarch64", target_arch = "arm64ec"))]
-pub(crate) const CMP_RESULT_TY: Type = types::I32;
 
 // In compiler-rt, LLP64 ABIs use `long long` and everything else uses `long`. In effect,
 // this means the return value is always pointer-sized.
 #[cfg(not(any(target_arch = "aarch64", target_arch = "arm64ec")))]
 #[cfg(feature = "jit")]
 type CmpResult = isize;
-#[cfg(not(any(target_arch = "aarch64", target_arch = "arm64ec")))]
-#[cfg(target_pointer_width = "32")]
-pub(crate) const CMP_RESULT_TY: Type = types::I32;
-#[cfg(not(any(target_arch = "aarch64", target_arch = "arm64ec")))]
-#[cfg(target_pointer_width = "64")]
-pub(crate) const CMP_RESULT_TY: Type = types::I64;
 
 macro_rules! builtin_functions {
     (

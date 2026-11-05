@@ -1,6 +1,5 @@
 use rustc_target::spec::Arch;
 
-use crate::compiler_builtins::CMP_RESULT_TY;
 use crate::prelude::*;
 
 pub(crate) fn f16_to_f32(fx: &mut FunctionCx<'_, '_, '_>, value: Value) -> Value {
@@ -103,6 +102,11 @@ pub(crate) fn fcmp(fx: &mut FunctionCx<'_, '_, '_>, cc: FloatCC, lhs: Value, rhs
             fx.bcx.ins().fcmp(cc, lhs, rhs)
         }
         types::F128 => {
+            let cmp_result_ty = if matches!(fx.tcx.sess.target.arch, Arch::AArch64 | Arch::Arm64EC) {
+                types::I32
+            } else {
+                fx.pointer_type
+            };
             let (name, int_cc) = match cc {
                 FloatCC::Equal => ("__eqtf2", IntCC::Equal),
                 FloatCC::NotEqual => ("__netf2", IntCC::NotEqual),
@@ -115,10 +119,10 @@ pub(crate) fn fcmp(fx: &mut FunctionCx<'_, '_, '_>, cc: FloatCC, lhs: Value, rhs
             let res = fx.lib_call(
                 name,
                 vec![AbiParam::new(types::F128), AbiParam::new(types::F128)],
-                vec![AbiParam::new(CMP_RESULT_TY)],
+                vec![AbiParam::new(cmp_result_ty)],
                 &[lhs, rhs],
             )[0];
-            let zero = fx.bcx.ins().iconst(CMP_RESULT_TY, 0);
+            let zero = fx.bcx.ins().iconst(cmp_result_ty, 0);
             fx.bcx.ins().icmp(int_cc, res, zero)
         }
         _ => unreachable!("{ty:?}"),
