@@ -203,6 +203,17 @@ fn codegen_cgu(tcx: TyCtxt<'_>, cgu_name: Symbol) -> AotModule {
     for (mono_item, item_data) in mono_items {
         match mono_item {
             MonoItem::Fn(instance) => {
+                if super::has_lr35902_float_mir(tcx, mono_item) {
+                    if tcx.is_compiler_builtins(LOCAL_CRATE)
+                        || tcx.crate_name(LOCAL_CRATE).as_str() == "core"
+                    {
+                        continue;
+                    }
+                    tcx.dcx().span_fatal(
+                        tcx.instance_mir(instance.def).span,
+                        "floating-point operations are not supported on the LR35902 target",
+                    );
+                }
                 let flags = tcx.codegen_instance_attrs(instance.def).flags;
                 if flags.contains(CodegenFnAttrFlags::NAKED) {
                     rustc_codegen_ssa::mir::naked_asm::codegen_naked_asm(

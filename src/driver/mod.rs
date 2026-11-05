@@ -22,6 +22,9 @@ fn predefine_mono_items<'tcx>(
     tcx.prof.generic_activity("predefine functions").run(|| {
         let is_compiler_builtins = tcx.is_compiler_builtins(LOCAL_CRATE);
         for &(mono_item, data) in mono_items {
+            if has_lr35902_float_mir(tcx, mono_item) {
+                continue;
+            }
             match mono_item {
                 MonoItem::Fn(instance) => {
                     let name = tcx.symbol_name(instance).name;
@@ -49,6 +52,25 @@ fn predefine_mono_items<'tcx>(
             }
         }
     });
+}
+
+pub(crate) fn has_lr35902_float_mir<'tcx>(tcx: TyCtxt<'tcx>, mono_item: MonoItem<'tcx>) -> bool {
+    if tcx.sess.target.arch != rustc_target::spec::Arch::Other("z80".into()) {
+        return false;
+    }
+
+    let MonoItem::Fn(instance) = mono_item else {
+        return false;
+    };
+    let mir = tcx.instance_mir(instance.def);
+    mir.local_decls.iter().any(|decl| {
+        let ty = instance.instantiate_mir_and_normalize_erasing_regions(
+            tcx,
+            ty::TypingEnv::fully_monomorphized(),
+            ty::EarlyBinder::bind(tcx, decl.ty),
+        );
+        ty.is_floating_point()
+    })
 }
 
 struct MeasuremeProfiler(SelfProfilerRef);
