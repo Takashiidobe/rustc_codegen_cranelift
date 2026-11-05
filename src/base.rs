@@ -3,7 +3,7 @@
 use cranelift_codegen::CodegenError;
 use cranelift_codegen::ir::UserFuncName;
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
-use cranelift_module::ModuleError;
+use cranelift_module::{FuncId, Module, ModuleError};
 use rustc_ast::InlineAsmOptions;
 use rustc_attr_ir::lang_items::LangItem;
 use rustc_codegen_ssa::base::is_call_from_compiler_builtins_to_upstream_monomorphization;
@@ -251,7 +251,27 @@ pub(crate) fn compile_fn(
 
     if let Some(assembly_output) = assembly_output {
         if let Some(vcode) = &context.compiled_code().unwrap().vcode {
-            crate::rgbds::append_function(assembly_output, &codegened_func.symbol_name, vcode);
+            let external_symbols = context
+                .func
+                .params
+                .user_named_funcs()
+                .iter()
+                .filter_map(|(user_ref, name)| {
+                    if name.namespace != 0 {
+                        return None;
+                    }
+                    let func_id = FuncId::from_u32(name.index);
+                    let symbol =
+                        module.declarations().get_function_decl(func_id).linkage_name(func_id);
+                    Some((format!("User({user_ref:?})"), crate::rgbds::symbol_name(&symbol)))
+                })
+                .collect();
+            crate::rgbds::append_function(
+                assembly_output,
+                &codegened_func.symbol_name,
+                vcode,
+                &external_symbols,
+            );
         }
     }
 

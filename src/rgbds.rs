@@ -1,14 +1,23 @@
+use std::collections::HashMap;
 use std::fmt::Write;
 
 pub(crate) fn new_source(module: &str) -> String {
     format!("SECTION \"{}\", ROM0\n\n", symbol_name(&format!("cgu_{module}")))
 }
 
-pub(crate) fn append_function(source: &mut String, symbol: &str, vcode: &str) {
+pub(crate) fn append_function(
+    source: &mut String,
+    symbol: &str,
+    vcode: &str,
+    external_symbols: &HashMap<String, String>,
+) {
     let symbol = symbol_name(symbol);
     writeln!(source, "EXPORT {symbol}\n{symbol}::").unwrap();
     for line in vcode.lines() {
-        writeln!(source, "{}", localize_block_labels(line)).unwrap();
+        let line = external_symbols
+            .iter()
+            .fold(line.to_owned(), |line, (external, symbol)| line.replace(external, symbol));
+        writeln!(source, "{}", localize_block_labels(&line)).unwrap();
     }
     source.push('\n');
 }
@@ -71,6 +80,7 @@ fn is_symbol_byte(byte: u8) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
     use std::fs;
     use std::process::Command;
 
@@ -83,6 +93,7 @@ mod tests {
             &mut source,
             "_RNvCs3foo3bar",
             "block0:\n  ld a, $01\n  jr label1\nblock1:\n  ret",
+            &HashMap::new(),
         );
 
         assert!(source.contains("EXPORT __rust__RNvCs3foo3bar"));
@@ -111,6 +122,7 @@ mod tests {
             &mut source,
             "test_function",
             "block0:\n  jp label1\nblock1:\n  ld b, $2A\n  ld hl, sp - 2\n  ld a, [hl]\n  ret",
+            &HashMap::new(),
         );
         fs::write(&source_path, source).unwrap();
 
@@ -139,7 +151,14 @@ mod tests {
             let source_path = dir.join(format!("{unit}.asm"));
             let object_path = dir.join(format!("{unit}.o"));
             let mut source = super::new_source(unit);
-            append_function(&mut source, &format!("function_{unit}"), "block0:\n  ret");
+            let (vcode, external_symbols) = if unit == "one" {
+                let mut symbols = HashMap::new();
+                symbols.insert("User(userextname0)".into(), symbol_name("function_two"));
+                ("block0:\n  call User(userextname0)\n  ret", symbols)
+            } else {
+                ("block0:\n  ret", HashMap::new())
+            };
+            append_function(&mut source, &format!("function_{unit}"), vcode, &external_symbols);
             fs::write(&source_path, source).unwrap();
             let output = Command::new("rgbasm")
                 .arg("-o")
@@ -166,6 +185,8 @@ mod tests {
             "rgblink failed: {}",
             String::from_utf8_lossy(&output.stderr)
         );
+        let source = fs::read_to_string(dir.join("one.asm")).unwrap();
+        assert!(source.contains("call __rust_function_two"));
         fs::remove_dir_all(dir).unwrap();
     }
 }
