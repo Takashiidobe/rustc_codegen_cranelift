@@ -74,6 +74,7 @@ mod num;
 mod optimize;
 mod pointer;
 mod pretty_clif;
+mod rgbds;
 mod toolchain;
 mod unsize;
 mod unwind_module;
@@ -262,6 +263,10 @@ fn enable_verifier(sess: &Session) -> bool {
 }
 
 fn target_tuple(sess: &Session) -> target_lexicon::Triple {
+    if sess.target.arch == Arch::Other("z80".into()) {
+        return "z80-unknown-none".parse().unwrap();
+    }
+
     // Use versioned target tuple to make `OperatingSystem::MacOSX(...)`
     // contain a value, which we use when emitting `LC_BUILD_VERSION`.
     match back::versioned_llvm_target(sess).parse() {

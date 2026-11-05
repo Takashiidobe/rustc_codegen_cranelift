@@ -153,6 +153,7 @@ pub(crate) fn compile_fn(
     dcx: DiagCtxtHandle<'_>,
     output_filenames: &OutputFilenames,
     should_write_ir: bool,
+    assembly_output: Option<&mut String>,
     cached_context: &mut Context,
     module: &mut dyn Module,
     debug_context: Option<&mut DebugContext>,
@@ -191,7 +192,7 @@ pub(crate) fn compile_fn(
 
     // Define function
     prof.generic_activity("define function").run(|| {
-        context.want_disasm = should_write_ir;
+        context.want_disasm = should_write_ir || assembly_output.is_some();
         match module.define_function(codegened_func.func_id, context) {
             Ok(()) => {}
             Err(ModuleError::Compilation(CodegenError::ImplLimitExceeded)) => {
@@ -245,6 +246,12 @@ pub(crate) fn compile_fn(
                 &format!("{}.vcode", codegened_func.symbol_name),
                 |file| file.write_all(disasm.as_bytes()),
             )
+        }
+    }
+
+    if let Some(assembly_output) = assembly_output {
+        if let Some(vcode) = &context.compiled_code().unwrap().vcode {
+            crate::rgbds::append_function(assembly_output, &codegened_func.symbol_name, vcode);
         }
     }
 

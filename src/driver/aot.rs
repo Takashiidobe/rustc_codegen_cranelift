@@ -39,16 +39,30 @@ pub(crate) struct AotModule {
     debug_context: Option<DebugContext>,
     codegened_functions: Vec<CodegenedFunction>,
     global_asm: String,
+    assembly: String,
+    assembly_only: bool,
 }
 
 fn make_module(tcx: TyCtxt<'_>, cgu_name: &str) -> AotModule {
     let isa = crate::build_isa(tcx.sess, false);
+    let assembly_only = isa.name() == "lr35902"
+        && tcx.sess.opts.output_types.contains_key(&OutputType::Assembly)
+        && !tcx.sess.opts.output_types.contains_key(&OutputType::Object)
+        && !tcx.sess.opts.output_types.contains_key(&OutputType::Exe);
 
-    let mut builder = ObjectBuilder::new(
-        isa,
-        cgu_name.to_owned() + ".o",
-        cranelift_module::default_libcall_names(),
-    )
+    let mut builder = if assembly_only {
+        ObjectBuilder::new_for_assembly(
+            isa,
+            cgu_name.to_owned() + ".o",
+            cranelift_module::default_libcall_names(),
+        )
+    } else {
+        ObjectBuilder::new(
+            isa,
+            cgu_name.to_owned() + ".o",
+            cranelift_module::default_libcall_names(),
+        )
+    }
     .unwrap();
 
     // Disable function sections by default on MSVC as it causes significant slowdowns with link.exe.
@@ -70,7 +84,8 @@ fn make_module(tcx: TyCtxt<'_>, cgu_name: &str) -> AotModule {
 
     let producer = crate::debuginfo::producer(tcx.sess);
     let global_asm_config = GlobalAsmConfig::new(tcx.sess);
-    let debug_context = DebugContext::new(tcx, module.isa(), false, cgu_name);
+    let debug_context =
+        if assembly_only { None } else { DebugContext::new(tcx, module.isa(), false, cgu_name) };
     let codegened_functions = vec![];
     let global_asm = String::new();
 
@@ -81,7 +96,36 @@ fn make_module(tcx: TyCtxt<'_>, cgu_name: &str) -> AotModule {
         debug_context,
         codegened_functions,
         global_asm,
+        assembly: crate::rgbds::new_source(cgu_name),
+        assembly_only,
     }
+}
+
+fn emit_assembly_module(
+    output_filenames: &OutputFilenames,
+    module: UnwindModule<ObjectModule>,
+    assembly: String,
+    kind: ModuleKind,
+    name: String,
+) -> Result<CompiledModule, String> {
+    if module.module.declarations().get_data_objects().next().is_some() {
+        return Err("RGBDS assembly output does not yet support Rust data objects".into());
+    }
+
+    let tmp_file = output_filenames.temp_path_for_cgu(OutputType::Assembly, &name);
+    std::fs::write(&tmp_file, assembly)
+        .map_err(|err| format!("error writing RGBDS assembly: {err}"))?;
+
+    Ok(CompiledModule {
+        name,
+        kind,
+        object: None,
+        global_asm_object: None,
+        dwarf_object: None,
+        bytecode: None,
+        assembly: Some(tmp_file),
+        llvm_ir: None,
+    })
 }
 
 fn emit_module(
@@ -211,10 +255,12 @@ fn compile_cgu(
     dcx: DiagCtxtHandle<'_>,
     output_filenames: &OutputFilenames,
     should_write_ir: bool,
+    should_write_asm: bool,
     mut aot_module: AotModule,
     cgu_name: String,
     kind: ModuleKind,
 ) -> Result<CompiledModule, String> {
+    let should_write_asm = should_write_asm && aot_module.module.isa().name() == "lr35902";
     prof.generic_activity_with_arg("compile functions", &*cgu_name).run(|| {
         cranelift_codegen::timing::set_thread_profiler(Box::new(super::MeasuremeProfiler(
             prof.clone(),
@@ -227,6 +273,7 @@ fn compile_cgu(
                 dcx,
                 &output_filenames,
                 should_write_ir,
+                should_write_asm.then_some(&mut aot_module.assembly),
                 &mut cached_context,
                 &mut aot_module.module,
                 aot_module.debug_context.as_mut(),
@@ -236,9 +283,13 @@ fn compile_cgu(
         }
     });
 
+    if aot_module.assembly_only {
+        aot_module.assembly.push_str(&aot_module.global_asm);
+    }
+
     let global_asm_object_file =
         prof.generic_activity_with_arg("compile assembly", &*cgu_name).run(|| {
-            if aot_module.global_asm.is_empty() {
+            if aot_module.global_asm.is_empty() || aot_module.assembly_only {
                 return Ok::<_, String>(None);
             }
 
@@ -252,17 +303,27 @@ fn compile_cgu(
             Ok(Some(global_asm_object_file))
         })?;
 
-    prof.generic_activity_with_arg("write object file", &*cgu_name).run(|| {
-        emit_module(
-            output_filenames,
-            prof,
-            aot_module.module,
-            aot_module.debug_context,
-            kind,
-            cgu_name.clone(),
-            global_asm_object_file,
-            &aot_module.producer,
-        )
+    prof.generic_activity_with_arg("write output module", &*cgu_name).run(|| {
+        if aot_module.assembly_only {
+            emit_assembly_module(
+                output_filenames,
+                aot_module.module,
+                aot_module.assembly,
+                kind,
+                cgu_name,
+            )
+        } else {
+            emit_module(
+                output_filenames,
+                prof,
+                aot_module.module,
+                aot_module.debug_context,
+                kind,
+                cgu_name.clone(),
+                global_asm_object_file,
+                &aot_module.producer,
+            )
+        }
     })
 }
 
@@ -382,6 +443,7 @@ impl WriteBackendMethods for AotDriver {
             dcx.handle(),
             &cgcx.output_filenames,
             config.emit_ir,
+            config.emit_asm,
             module.module_llvm,
             module.name,
             module.kind,

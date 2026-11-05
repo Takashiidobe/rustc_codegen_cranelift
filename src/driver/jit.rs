@@ -164,6 +164,7 @@ fn codegen_and_compile_fn<'tcx>(
             tcx.dcx(),
             output_filenames,
             should_write_ir,
+            None,
             cached_context,
             module,
             debug_context.as_deref_mut(),
