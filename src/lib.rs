@@ -184,10 +184,12 @@ impl CodegenBackend for CraneliftCodegenBackend {
         // FIXME(f16_f128): `rustc_codegen_llvm` currently disables support on Windows GNU
         // targets due to GCC using a different ABI than LLVM. Therefore `f16` and `f128`
         // won't be available when using a LLVM-built sysroot.
-        let has_reliable_f16_f128 = !(sess.target.arch == Arch::X86_64
-            && sess.target.os == Os::Windows
-            && sess.target.env == Env::Gnu
-            && sess.target.cfg_abi != CfgAbi::Llvm);
+        let is_lr35902 = sess.target.arch == Arch::Other("z80".into());
+        let has_reliable_f16_f128 = !is_lr35902
+            && !(sess.target.arch == Arch::X86_64
+                && sess.target.os == Os::Windows
+                && sess.target.env == Env::Gnu
+                && sess.target.cfg_abi != CfgAbi::Llvm);
 
         // FIXME(f128): f128 math operations need f128 math symbols, which currently aren't always
         // filled in by compiler-builtins. The only libc that provides these currently is glibc.
