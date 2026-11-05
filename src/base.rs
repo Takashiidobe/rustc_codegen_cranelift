@@ -211,6 +211,12 @@ pub(crate) fn compile_fn(
                 eprintln!("{pretty_error}");
                 bug!("cranelift verify error");
             }
+            Err(ModuleError::Compilation(CodegenError::Unsupported(reason))) => {
+                dcx.fatal(format!(
+                    "LR35902 backend cannot compile `{name}`: {reason}",
+                    name = codegened_func.symbol_name
+                ));
+            }
             Err(err) => {
                 let mut clif = format_clif_ir_header(module.isa(), &codegened_func.symbol_name);
                 cranelift_codegen::write::decorate_function(
