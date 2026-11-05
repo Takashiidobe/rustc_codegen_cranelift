@@ -33,8 +33,11 @@ fn localize_block_labels(line: &str) -> String {
     while offset < bytes.len() {
         let starts_block = bytes[offset..].starts_with(b"block")
             && (offset == 0 || !is_symbol_byte(bytes[offset - 1]));
-        if starts_block {
-            let digits_start = offset + b"block".len();
+        let starts_label = bytes[offset..].starts_with(b"label")
+            && (offset == 0 || !is_symbol_byte(bytes[offset - 1]));
+        if starts_block || starts_label {
+            let prefix_len = if starts_block { b"block".len() } else { b"label".len() };
+            let digits_start = offset + prefix_len;
             let mut digits_end = digits_start;
             while digits_end < bytes.len() && bytes[digits_end].is_ascii_digit() {
                 digits_end += 1;
@@ -43,7 +46,12 @@ fn localize_block_labels(line: &str) -> String {
                 && (digits_end == bytes.len() || !is_symbol_byte(bytes[digits_end]))
             {
                 localized.push('.');
-                localized.push_str(&line[offset..digits_end]);
+                if starts_label {
+                    localized.push_str("block");
+                    localized.push_str(&line[digits_start..digits_end]);
+                } else {
+                    localized.push_str(&line[offset..digits_end]);
+                }
                 offset = digits_end;
                 continue;
             }
@@ -74,7 +82,7 @@ mod tests {
         append_function(
             &mut source,
             "_RNvCs3foo3bar",
-            "block0:\n  ld a, $01\n  jr block1\nblock1:\n  ret",
+            "block0:\n  ld a, $01\n  jr label1\nblock1:\n  ret",
         );
 
         assert!(source.contains("EXPORT __rust__RNvCs3foo3bar"));
@@ -102,7 +110,7 @@ mod tests {
         append_function(
             &mut source,
             "test_function",
-            "block0:\n  ld b, $2A\n  ld hl, sp - 2\n  ld a, [hl]\n  ret",
+            "block0:\n  jp label1\nblock1:\n  ld b, $2A\n  ld hl, sp - 2\n  ld a, [hl]\n  ret",
         );
         fs::write(&source_path, source).unwrap();
 
