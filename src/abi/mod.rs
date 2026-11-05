@@ -622,6 +622,12 @@ pub(crate) fn codegen_terminator_call<'tcx>(
 
         // FIXME: Find a cleaner way to support varargs.
         if fn_abi.c_variadic {
+            if fx.tcx.sess.target.arch == Arch::Other("z80".into()) {
+                fx.tcx.dcx().span_fatal(
+                    source_info.span,
+                    "C variadic calls are not supported on the LR35902 target",
+                );
+            }
             adjust_call_for_c_variadic(fx, fn_abi, source_info, func_ref, &mut call_args);
         }
 
